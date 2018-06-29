@@ -87,6 +87,11 @@ def github_repo_to_api_releases(url):
     return url
 
 
+def github_repo_to_api_tags(url):
+    """Converts a github repoository url to the api entry with the tags"""
+    url = github_repo_to_api(url)
+    url += "/tags"
+    return url
 def normalize_url(url):
     """
     Canonical urls be like: https, no slash, no file extension
@@ -99,6 +104,15 @@ def normalize_url(url):
     if url.endswith(".git"):
         url = url[:-4]
     return url
+def string_to_wddate(isotimestamp):
+    date = pywikibot.WbTime.fromTimestr(
+        isotimestamp, calendarmodel=Settings.calendarmodel
+    )
+    date.hour = 0
+    date.minute = 0
+    date.second = 0
+    date.precision = pywikibot.WbTime.PRECISION["day"]
+    return date
 
 
 def _get_or_create(method, all_objects, repo, p_value, value):
@@ -214,6 +228,100 @@ def query_projects():
     return projects
 
 
+def get_releases_from_github(url, properties, project_info):
+
+    # Get all pages of the release information
+    repourl = github_repo_to_api_releases(url)
+    page_number = 1
+    releases = []
+    while True:
+        page = get_json_cached(repourl + "?page=" + str(page_number))
+        if not page:
+            break
+        page_number += 1
+        releases += page
+
+    properties["stable_release"] = []
+    properties["pre_release"] = []
+
+    # (pre)release versions and dates
+    for release in releases:
+        # Heuristics to find the version number
+        match_tag_name = extract_version(release["tag_name"], project_info["name"])
+        match_name = extract_version(release["name"], project_info["name"])
+        if match_tag_name is not None:
+            release_type, version = match_name
+            original_version = release["tag_name"]
+        elif match_name is not None:
+            release_type, version = match_name
+            original_version = release["name"]
+        else:
+            logger.warning("Invalid version string '{}'".format(release["name"]))
+            continue
+
+        # Often prereleases aren't marked as such, so we need manually catch those cases
+        if not release["prerelease"] and release_type != "stable":
+            logger.info("Diverting release type: " + original_version)
+            release["prerelease"] = True
+        elif release["prerelease"] and release_type == "stable":
+            release_type = "unstable"
+
+        # Convert github's timestamps to wikidata dates
+        date = string_to_wddate(release["published_at"])
+
+        if release["prerelease"]:
+            prefix = "pre_release"
+        else:
+            prefix = "stable_release"
+        properties[prefix].append(
+            {"version": version, "date": date,
+             "page": release["html_url"], "release_type": release_type}
+        )
+    return properties
+
+
+def get_tags_from_github(url, properties, project_info):
+    # Get all pages of the release information
+    repourl = github_repo_to_api_tags(url)
+    page_number = 1
+    releases = []
+    while True:
+        page = get_json_cached(repourl + "?page=" + str(page_number))
+        if not page:
+            break
+        page_number += 1
+        releases += page
+
+    properties["stable_release"] = []
+    properties["pre_release"] = []
+
+    # (pre)release versions and dates
+    for release in releases:
+        # Heuristics to find the version number
+        match_name = extract_version(release["name"], project_info["name"])
+        if match_name is not None:
+            release_type, version = match_name
+        else:
+            logger.warning("Invalid version string '{}'".format(release["name"]))
+            continue
+
+        # Convert github's timestamps to wikidata dates
+        date = string_to_wddate(
+            get_json_cached(release["commit"]["url"])["commit"]["committer"]["date"])
+        html_url = project_info["html_url"] + "/releases/tag/" + release["name"]
+
+        if release_type != "stable":
+            prefix = "pre_release"
+        else:
+            prefix = "stable_release"
+        properties[prefix].append(
+            {"version": version, "date": date,
+             "page": html_url, "release_type": release_type}
+        )
+
+    return properties
+
+
 def get_data_from_github(url, properties):
     """
     Retrieve the following data from github. Sets it to None if none was given by github
@@ -231,14 +339,7 @@ def get_data_from_github(url, properties):
     # "retrieved" does only accept dates without time, so create a timestamp with no date
     # noinspection PyUnresolvedReferences
     isotimestamp = pywikibot.Timestamp.utcnow().toISOformat()
-    date = pywikibot.WbTime.fromTimestr(
-        isotimestamp, calendarmodel=Settings.calendarmodel
-    )
-    date.hour = 0
-    date.minute = 0
-    date.second = 0
-    date.precision = pywikibot.WbTime.PRECISION["day"]
-    properties["retrieved"] = date
+    properties["retrieved"] = string_to_wddate(isotimestamp)
 
     # General project information
     project_info = get_json_cached(github_repo_to_api(url))
@@ -246,59 +347,10 @@ def get_data_from_github(url, properties):
     if project_info.get("homepage"):
         properties["website"] = project_info["homepage"]
 
-    # Get all pages of the release information
-    url = github_repo_to_api_releases(url)
-    page_number = 1
-    releases = []
-    while True:
-        page = get_json_cached(url + "?page=" + str(page_number))
-        if not page:
-            break
-        page_number += 1
-        releases += page
-
-    properties["stable_release"] = []
-    properties["pre_release"] = []
-
-    # (pre)release versions and dates
-    for release in releases:
-        # Heuristics to find the version number
-        match_tag_name = extract_version(release["tag_name"], project_info["name"])
-        match_name = extract_version(release["name"], project_info["name"])
-        if match_tag_name is not None:
-            release_type, version = match_tag_name
-            original_version = release["tag_name"]
-        elif match_name is not None:
-            release_type, version = match_name
-            original_version = release["name"]
-        else:
-            logger.warning("Invalid version string '{}'".format(release["name"]))
-            continue
-
-        # Often prereleases aren't marked as such, so we need manually catch those cases
-        if not release["prerelease"] and release_type != "stable":
-            logger.info("Diverting release type: " + original_version)
-            release["prerelease"] = True
-        elif release["prerelease"] and release_type == "stable":
-            release_type = "unstable"
-
-        # Convert github's timestamps to wikidata dates
-        date = pywikibot.WbTime.fromTimestr(
-            release["published_at"], calendarmodel=Settings.calendarmodel
-        )
-        date.hour = 0
-        date.minute = 0
-        date.second = 0
-        date.precision = pywikibot.WbTime.PRECISION["day"]
-
-        if release["prerelease"]:
-            prefix = "pre_release"
-        else:
-            prefix = "stable_release"
-        properties[prefix].append(
-            {"version": version, "date": date,
-             "page": release["html_url"], "release_type": release_type}
-        )
+    properties = get_releases_from_github(url, properties, project_info)
+    if (len(properties["stable_release"]) == 0 and
+       len(properties["pre_release"]) == 0):
+        properties = get_tags_from_github(url, properties, project_info)
 
     return properties
 
