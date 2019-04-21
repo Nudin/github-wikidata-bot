@@ -1,6 +1,7 @@
 import logging
 import re
 from typing import List, Optional, Tuple
+from cmp_version import cmp_version, cmp
 
 logger = logging.getLogger(__name__)
 
@@ -12,9 +13,57 @@ def number_of_unique_values(values: List[str]) -> int:
     return len(set(map(lambda s: s.lower(), values)))
 
 
-def extract_version(
-    string: str, name: Optional[str] = None
-) -> Optional[Tuple[str, str]]:
+class Release:
+    VALID_TYPES = ["stable", "beta", "alpha", "rc", "unstable"]
+    type = None
+    date = None
+    __str__ = None
+
+    def __init__(self, string=None):
+        self.__str__ = string
+
+    @property
+    def string(self):
+        return self.__str__
+
+    @string.setter
+    def string(self, string):
+        self.__str__ = string
+
+    def __cmp__(self, other):
+        if self.date is None or other.date is None:
+            return cmp_version(self.__init__, other.__init__)
+        else:
+            return cmp(self.date, other.date)
+
+    def __lt__(self, other):
+        return bool(self.__cmp__(other) < 0)
+
+    def __le__(self, other):
+        return bool(self.__cmp__(other) <= 0)
+
+    def __gt__(self, other):
+        return bool(self.__cmp__(other) > 0)
+
+    def __ge__(self, other):
+        return bool(self.__cmp__(other) >= 0)
+
+    def __eq__(self, other):
+        # Todo: handle subtypes (beta is unstable…)
+        return bool(self.__cmp__(other) == 0 and self.type == other.type)
+
+    def __ne__(self, other):
+        # Todo: handle subtypes (beta is unstable…)
+        return bool(self.__cmp__(other) != 0 or self.type != other.type)
+
+    def __repr__(self):
+        return "Release(%s, date=%s, type=%s)" % (self.__str__, self.date, self.type)
+
+    def is_stable(self):
+        return bool(self.type == "stable")
+
+
+def extract_version(string: str, name: Optional[str] = None) -> Optional[Release]:
     """
     Heuristic to extract a version-number from a string.
 
@@ -28,9 +77,7 @@ def extract_version(
              - version number
     """
     string = string.strip()
-    VALID_TYPES = ["stable", "beta", "alpha", "rc", "unstable"]
-    versiontype = None
-    extracted_version = None
+    version = Release()
 
     # Remove a prefix of the name of the program if existent
     if name:
@@ -59,11 +106,11 @@ def extract_version(
     words = ["stable", "beta", "alpha", "rc", "pre", "preview", "b\d", "dev"]
     res = re.findall(r"(" + "|".join(words) + r")", string, re.IGNORECASE)
     if number_of_unique_values(res) == 1:
-        versiontype = res[0].lower()
-        if versiontype[0] == "b":
-            versiontype = "beta"
-        if versiontype not in VALID_TYPES:
-            versiontype = "unstable"
+        version.type = res[0].lower()
+        if version.type[0] == "b":
+            version.type = "beta"
+        if version.type not in version.VALID_TYPES:
+            version.type = "unstable"
     elif number_of_unique_values(res) > 1:
         return None
 
@@ -76,18 +123,18 @@ def extract_version(
     # remove "stable" from version string
     res = list(map(lambda s: re.sub(r"[._-]stable[._-]?", "", s[1]), res))
     if number_of_unique_values(res) == 1:
-        extracted_version = res[0]
+        version.string = res[0]
     else:
         # If the string contains nothing but a version-number we are more gratefully with what we accept
         full = re.compile(r"[1-9]\d{0,4}", re.IGNORECASE)
         if full.fullmatch(string):
-            extracted_version = string
+            version.string = string
 
-    if extracted_version is not None:
+    if version.string is not None:
         # if we don't find any indication about the state of the version,
         # we assume it's a stable version
-        if versiontype is None:
-            versiontype = "stable"
-        return (versiontype, extracted_version)
+        if version.type is None:
+            version.type = "stable"
+        return version
 
     return None
