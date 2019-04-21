@@ -14,7 +14,7 @@ def number_of_unique_values(values: List[str]) -> int:
 
 
 class Release:
-    __VALID_TYPES__ = ["stable", "beta", "alpha", "rc", "unstable"]
+    __VALID_TYPES__ = ["unstable", "alpha", "beta", "rc", "stable"]
     type = None
     date = None
     __str__ = None
@@ -29,10 +29,19 @@ class Release:
         return self.__str__
 
     def __cmp__(self, other):
-        if self.date is None or other.date is None:
-            return cmp_version(self.__init__, other.__init__)
+        if self.date is not None and other.date is not None:
+            date_comp = cmp(self.date, other.date)
+            if date_comp != 0:
+                return date_comp
+        vers_comp = cmp_version(self.__str__, other.__str__)
+        if vers_comp != 0:
+            return vers_comp
         else:
-            return cmp(self.date, other.date)
+            # Todo: handle subtypes (beta is unstable…)
+            return cmp(
+                self.__VALID_TYPES__.index(self.type),
+                self.__VALID_TYPES__.index(other.type),
+            )
 
     def __lt__(self, other):
         return bool(self.__cmp__(other) < 0)
@@ -47,12 +56,10 @@ class Release:
         return bool(self.__cmp__(other) >= 0)
 
     def __eq__(self, other):
-        # Todo: handle subtypes (beta is unstable…)
-        return bool(self.__cmp__(other) == 0 and self.type == other.type)
+        return bool(self.__cmp__(other) == 0)
 
     def __ne__(self, other):
-        # Todo: handle subtypes (beta is unstable…)
-        return bool(self.__cmp__(other) != 0 or self.type != other.type)
+        return bool(self.__cmp__(other) != 0)
 
     def __repr__(self):
         return "Release(%s, date=%s, type=%s)" % (self.__str__, self.date, self.type)
