@@ -339,8 +339,8 @@ def analyse_release(release: dict, project_info: dict) -> Optional[Release]:
     marked with githubs release-feature
     """
     project_name = project_info["name"]
-    match_tag_name = extract_version(release.get("tag_name") or "", project_name)
-    match_name = extract_version(release.get("name") or "", project_name)
+    match_tag_name = extract_version(release.get("tag_name", ""), project_name)
+    match_name = extract_version(release.get("name", ""), project_name)
     if (
         match_tag_name is not None
         and match_name is not None
@@ -354,7 +354,7 @@ def analyse_release(release: dict, project_info: dict) -> Optional[Release]:
                 release["name"],
                 project_name,
             )
-        )
+        )extract_version
         return None
     elif match_tag_name is not None:
         release_type, version = match_tag_name
